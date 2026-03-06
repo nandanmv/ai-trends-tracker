@@ -141,6 +141,8 @@ with st.sidebar:
             type="password", help="Reddit fallback + web search (openrouter.ai)"
         )
         OPENROUTER_MODELS = [
+            "minimax/minimax-m2.5",
+            "moonshotai/kimi-k2.5",
             "perplexity/sonar-pro",
             "perplexity/sonar",
             "perplexity/sonar-deep-research",
