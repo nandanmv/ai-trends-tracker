@@ -2,7 +2,7 @@
 
 ## Overview
 
-AI Trends Tracker lets you research what people are saying about any topic across Reddit, X/Twitter, YouTube, TikTok, Instagram, Hacker News, and Polymarket — all in one report. You pick the topic and how far back to look (up to 30 days).
+AI Trends Tracker lets you research what people are saying about any topic across Reddit, X/Twitter, YouTube, TikTok, Instagram, Hacker News, and Polymarket — all in one report. You pick the topic and how far back to look (up to 90 days).
 
 ---
 
@@ -76,7 +76,7 @@ Type any topic in the search bar. Be as specific or broad as you like:
 
 ### Step 2 — Set the time window
 
-Use the **Look back (days)** slider to set how far back to search (1–30 days). The default is 30 days.
+Use the **Look back (days)** slider to set how far back to search (1–90 days). The default is 30 days.
 
 ### Step 3 — Choose research depth
 

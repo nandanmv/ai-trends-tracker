@@ -201,7 +201,7 @@ with st.form("search_form"):
     col1, col2, col3 = st.columns([2, 2, 1])
 
     with col1:
-        days = st.slider("Look back (days)", min_value=1, max_value=30, value=30, step=1)
+        days = st.slider("Look back (days)", min_value=1, max_value=90, value=30, step=1)
 
     with col2:
         depth = st.radio(

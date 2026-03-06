@@ -54,7 +54,7 @@ Configure in the sidebar when the app is running. Keys are saved to `~/.config/l
 ## Usage
 
 1. Enter your topic in the search bar
-2. Set the lookback window (1–30 days)
+2. Set the lookback window (1–90 days)
 3. Choose research depth: Quick (~2 min) / Default (~5 min) / Deep (~8 min)
 4. Toggle which platforms to include
 5. Click **Run Report**
