@@ -8,7 +8,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import streamlit as st
@@ -18,6 +18,7 @@ SKILL_DIR = Path.home() / ".claude" / "skills" / "last30days" / "scripts"
 SCRIPT = SKILL_DIR / "last30days.py"
 CONFIG_DIR = Path.home() / ".config" / "last30days"
 ENV_FILE = CONFIG_DIR / ".env"
+RESULTS_DIR = Path(__file__).parent / "results"
 
 # ── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -104,6 +105,17 @@ def build_cmd(topic: str, days: int, depth: str, sources: list[str], debug: bool
     if debug:
         cmd.append("--debug")
     return cmd
+
+
+def save_result(topic: str, content: str) -> Path:
+    """Save report to results/{slug}_{timestamp}.md and return the path."""
+    RESULTS_DIR.mkdir(exist_ok=True)
+    slug = re.sub(r"[^\w\s-]", "", topic.lower()).strip()
+    slug = re.sub(r"[\s_-]+", "_", slug)[:50]
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = RESULTS_DIR / f"{slug}_{ts}.md"
+    path.write_text(content, encoding="utf-8")
+    return path
 
 
 def parse_source_status(output: str) -> dict:
@@ -382,10 +394,15 @@ if submitted:
             output_placeholder.empty()
             progress_bar.empty()
             st.markdown(final_output)
+
+            # Auto-save to results/
+            saved_path = save_result(topic.strip(), final_output)
+            st.success(f"Saved to `{saved_path.relative_to(Path(__file__).parent)}`")
+
             st.download_button(
                 label="Download Report (Markdown)",
                 data=final_output,
-                file_name=f"trends_{topic.replace(' ', '_')}_{date.today()}.md",
+                file_name=saved_path.name,
                 mime="text/markdown",
             )
 
