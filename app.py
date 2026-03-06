@@ -92,7 +92,7 @@ def build_env(keys: dict) -> dict:
     return env
 
 
-def build_cmd(topic: str, days: int, depth: str, sources: list[str]) -> list[str]:
+def build_cmd(topic: str, days: int, depth: str, sources: list[str], debug: bool = False) -> list[str]:
     """Build the last30days.py CLI command."""
     cmd = [sys.executable, str(SCRIPT), topic, f"--days={days}", "--emit=md"]
     if depth == "Quick":
@@ -101,6 +101,8 @@ def build_cmd(topic: str, days: int, depth: str, sources: list[str]) -> list[str
         cmd.append("--deep")
     if sources:
         cmd.append(f"--search={','.join(sources)}")
+    if debug:
+        cmd.append("--debug")
     return cmd
 
 
@@ -127,11 +129,33 @@ with st.sidebar:
     st.subheader("API Keys")
     saved = load_env()
 
-    with st.expander("Configure keys", expanded=not saved.get("OPENAI_API_KEY")):
+    expanded = not (saved.get("OPENAI_API_KEY") or saved.get("OPENROUTER_API_KEY"))
+    with st.expander("Configure keys", expanded=expanded):
         openai_key = st.text_input(
             "OpenAI API Key", value=saved.get("OPENAI_API_KEY", ""),
-            type="password", help="Required for Reddit research"
+            type="password", help="For Reddit via OpenAI Responses API"
         )
+        st.caption("— or use OpenRouter instead of OpenAI for Reddit —")
+        openrouter_key = st.text_input(
+            "OpenRouter API Key", value=saved.get("OPENROUTER_API_KEY", ""),
+            type="password", help="Reddit fallback + web search (openrouter.ai)"
+        )
+        OPENROUTER_MODELS = [
+            "perplexity/sonar-pro",
+            "perplexity/sonar",
+            "perplexity/sonar-deep-research",
+            "openai/gpt-4o-search-preview",
+            "google/gemini-2.0-flash-001",
+        ]
+        saved_or_model = saved.get("OPENROUTER_REDDIT_MODEL", OPENROUTER_MODELS[0])
+        or_model_index = OPENROUTER_MODELS.index(saved_or_model) if saved_or_model in OPENROUTER_MODELS else 0
+        openrouter_reddit_model = st.selectbox(
+            "Reddit model (OpenRouter)",
+            OPENROUTER_MODELS,
+            index=or_model_index,
+            help="Model used when OpenRouter key is set and OpenAI key is absent",
+        )
+        st.divider()
         xai_key = st.text_input(
             "xAI API Key", value=saved.get("XAI_API_KEY", ""),
             type="password", help="X/Twitter fallback (optional — browser cookies work too)"
@@ -150,12 +174,14 @@ with st.sidebar:
         )
         brave_key = st.text_input(
             "Brave Search API Key", value=saved.get("BRAVE_API_KEY", ""),
-            type="password", help="Optional web search"
+            type="password", help="Optional web search (lower priority than OpenRouter)"
         )
 
         if st.button("Save Keys", type="primary", use_container_width=True):
             save_env({
                 "OPENAI_API_KEY": openai_key,
+                "OPENROUTER_API_KEY": openrouter_key,
+                "OPENROUTER_REDDIT_MODEL": openrouter_reddit_model,
                 "XAI_API_KEY": xai_key,
                 "AUTH_TOKEN": auth_token,
                 "CT0": ct0,
@@ -169,7 +195,7 @@ with st.sidebar:
 
     # Source availability indicators
     st.subheader("Source Status")
-    has_openai = bool(saved.get("OPENAI_API_KEY") or openai_key)
+    has_openai = bool(saved.get("OPENAI_API_KEY") or openai_key or saved.get("OPENROUTER_API_KEY") or openrouter_key)
     has_x = bool(saved.get("XAI_API_KEY") or xai_key or saved.get("AUTH_TOKEN") or auth_token)
     has_scrape = bool(saved.get("SCRAPECREATORS_API_KEY") or scrape_key)
 
@@ -213,6 +239,7 @@ with st.form("search_form"):
         )
 
     with col3:
+        debug_mode = st.checkbox("Debug logs", value=False, help="Stream verbose logs live")
         submitted = st.form_submit_button(
             "Run Report", type="primary", use_container_width=True
         )
@@ -254,6 +281,8 @@ if submitted:
     saved = load_env()
     env_vars = build_env({
         "OPENAI_API_KEY": saved.get("OPENAI_API_KEY", ""),
+        "OPENROUTER_API_KEY": saved.get("OPENROUTER_API_KEY", ""),
+        "OPENROUTER_REDDIT_MODEL": saved.get("OPENROUTER_REDDIT_MODEL", ""),
         "XAI_API_KEY": saved.get("XAI_API_KEY", ""),
         "AUTH_TOKEN": saved.get("AUTH_TOKEN", ""),
         "CT0": saved.get("CT0", ""),
@@ -261,7 +290,7 @@ if submitted:
         "BRAVE_API_KEY": saved.get("BRAVE_API_KEY", ""),
     })
 
-    cmd = build_cmd(topic.strip(), days, depth, selected_sources)
+    cmd = build_cmd(topic.strip(), days, depth, selected_sources, debug=debug_mode)
 
     st.divider()
     date_from = (date.today() - timedelta(days=days)).strftime("%b %d")
@@ -274,11 +303,15 @@ if submitted:
 
     progress_bar = st.progress(0, text="Starting research...")
 
+    # Live log expander — always visible so user can see activity
+    log_expander = st.expander("Live logs", expanded=debug_mode)
+    log_placeholder = log_expander.empty()
     output_placeholder = st.empty()
-    error_placeholder = st.empty()
 
-    # Stream output
     stdout_lines: list[str] = []
+    log_lines: list[str] = []
+
+    import threading
 
     try:
         proc = subprocess.Popen(
@@ -291,18 +324,30 @@ if submitted:
             bufsize=1,
         )
 
-        # Read stdout line by line and update display
         source_progress = {s: False for s in selected_sources}
         done_count = 0
 
         stdout_pipe = proc.stdout
         stderr_pipe = proc.stderr
+
         if stdout_pipe and stderr_pipe:
+            # Read stderr in a background thread so it never blocks stdout
+            _stderr = stderr_pipe  # narrow type for closure
+            def _read_stderr():
+                for line in iter(_stderr.readline, ""):
+                    log_lines.append(line)
+                    log_placeholder.code("".join(log_lines[-80:]), language="text")
+
+            stderr_thread = threading.Thread(target=_read_stderr, daemon=True)
+            stderr_thread.start()
+
             for line in iter(stdout_pipe.readline, ""):
                 stdout_lines.append(line)
-                combined = "".join(stdout_lines)
+                # Also echo stdout to logs
+                log_lines.append(line)
+                log_placeholder.code("".join(log_lines[-80:]), language="text")
 
-                # Detect source completions from output
+                combined = "".join(stdout_lines)
                 for src in list(source_progress.keys()):
                     if not source_progress[src]:
                         if re.search(rf'\b{src}\b', combined, re.IGNORECASE):
@@ -314,13 +359,11 @@ if submitted:
                                 text=f"Fetching... {done_count}/{len(selected_sources)} sources"
                             )
 
-                # Show live output
                 output_placeholder.markdown(combined)
 
             stdout_pipe.close()
-            stderr_output = stderr_pipe.read()
-        else:
-            stderr_output = ""
+            stderr_thread.join(timeout=5)
+
         proc.wait()
 
         progress_bar.progress(100, text="Complete!")
@@ -329,21 +372,14 @@ if submitted:
         final_output = "".join(stdout_lines)
 
         if proc.returncode != 0 and not final_output.strip():
-            error_placeholder.error(
-                f"Script exited with code {proc.returncode}.\n\n**stderr:**\n```\n{stderr_output[:2000]}\n```"
+            st.error(
+                f"Script exited with code {proc.returncode}. "
+                f"Check **Live logs** above for details."
             )
         else:
-            if stderr_output and proc.returncode != 0:
-                with st.expander("Warnings/Errors"):
-                    st.code(stderr_output[:3000], language="text")
-
-            # Final formatted display
             output_placeholder.empty()
             progress_bar.empty()
-
             st.markdown(final_output)
-
-            # Download button
             st.download_button(
                 label="Download Report (Markdown)",
                 data=final_output,
